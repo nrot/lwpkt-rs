@@ -2,7 +2,7 @@ mod ffi;
 
 pub struct LwRb {
     lwrb: ffi::lwrb,
-    buffer: Vec<u8>,
+    _buffer: Vec<u8>,
 }
 
 impl LwRb {
@@ -21,10 +21,11 @@ impl LwRb {
 
         debug_assert_eq!(res, 1);
 
-        Self { lwrb, buffer }
+        Self { lwrb, _buffer: buffer }
     }
 }
 
+#[derive(Debug)]
 pub enum Error {
     ERR = 0x1,
     INPROG,
@@ -132,8 +133,31 @@ impl LwPkt {
     fn get_cmd(&self) -> u32 {
         self.lwpkt.m.cmd
     }
+
+    pub fn raw_write(&mut self, raw: &[u8])->Result<(), Error>{
+        let res = unsafe{
+            ffi::lwrb_write(&mut self.write_buffer.lwrb as *mut _, raw.as_ptr() as *mut _, raw.len())
+        };
+
+        todo!()
+    }
+
 }
 
-pub fn test() {
-    
+
+#[cfg(test)]
+mod test{
+    use crate::{LwPkt, LwRb};
+
+    #[test]
+    fn init_test(){
+        let rb = LwRb::new(1024);
+        let wb = LwRb::new(1024);
+
+        let mut lwpkt = LwPkt::new(rb, wb).unwrap();
+
+        lwpkt.set_addres(0x12).unwrap();
+
+        lwpkt.write(0x11, 0x85, b"some hello").unwrap();
+    }
 }
