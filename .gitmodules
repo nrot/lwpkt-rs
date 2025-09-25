@@ -1,0 +1,3 @@
+[submodule "src/lwpkt"]
+	path = src/lwpkt
+	url = https://github.com/MaJerle/lwpkt.git
