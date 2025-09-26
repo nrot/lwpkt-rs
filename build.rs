@@ -36,6 +36,8 @@ impl LwPktOptions {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=lwpkt_opts_template.h");
+    println!("cargo:rerun-if-env-changed=LWPKT_CFG_MAX_DATA_LEN");
 
     // Tell cargo to look for shared libraries in the specified directory
     // println!("cargo:rustc-link-search=/path/to/lib");
