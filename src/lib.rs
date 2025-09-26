@@ -89,10 +89,10 @@ pub struct LwPktRaw {
 #[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub struct Package<'a> {
-    cmd: u32,
-    from: u8,
-    to: u8,
-    data: &'a [u8],
+    pub cmd: u32,
+    pub from: u8,
+    pub to: u8,
+    pub data: &'a [u8],
 }
 
 #[derive(Debug, PartialEq, Eq)]
