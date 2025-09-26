@@ -45,6 +45,8 @@ fn main() {
     println!("cargo:rerun-if-changed=lwpkt_opts_template.h");
     println!("cargo:rerun-if-env-changed=LWPKT_CFG_MAX_DATA_LEN");
 
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     // Tell cargo to look for shared libraries in the specified directory
     // println!("cargo:rustc-link-search=/path/to/lib");
 
@@ -67,19 +69,21 @@ fn main() {
     }
 
     if let Ok(branch) = std::env::var("LWPKT_BRANCH") {
-        let mut git_modules = File::options()
-            .append(true)
-            .create_new(false)
-            .create(false)
-            .open(".gitmodules")
+        let cmd = std::process::Command::new("git")
+            .args(&[
+                "--work-tree",
+                "./src/lwpkt",
+                "--git-dir",
+                "./src/lwpkt/.git",
+                "checkout",
+                "-q",
+                &branch,
+            ])
+            .status()
             .unwrap();
-        git_modules
-            .write_all(format!("\tbranch= {} \n", branch).as_bytes())
-            .unwrap();
-        git_modules.flush().unwrap();
+        assert!(cmd.success());
     }
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let out_lwpkt = out_path.join("lwpkt");
     let out_lwrb = out_path.join("lwrb");
 

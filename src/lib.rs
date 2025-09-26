@@ -148,7 +148,7 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
             ffi::lwpkt_write(
                 self.lwpkt.as_mut().get_mut() as *mut _,
                 package.to,
-                package.cmd,
+                package.cmd as _,
                 package.data.as_ptr() as *mut _,
                 package.data.len(),
             )
@@ -231,7 +231,7 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
     }
 
     fn get_cmd(&self) -> u32 {
-        self.lwpkt.m.cmd
+        self.lwpkt.m.cmd as u32
     }
 
     fn get_from(&self) -> u8 {
