@@ -25,7 +25,7 @@ impl LwPktOptions {
         drop(origin_f);
 
         if let Some(v) = self.max_data_len {
-            f.write_all(format!("\n#define LWPKT_CFG_MAX_DATA_LEN {v}").as_bytes())
+            f.write_all(format!("\n#define LWPKT_CFG_MAX_DATA_LEN {v}\n").as_bytes())
                 .unwrap();
         }
 
