@@ -66,6 +66,19 @@ fn main() {
         options.use_flags = true;
     }
 
+    if let Ok(branch) = std::env::var("LWPKT_BRANCH") {
+        let mut git_modules = File::options()
+            .append(true)
+            .create_new(false)
+            .create(false)
+            .open(".gitmodules")
+            .unwrap();
+        git_modules
+            .write_all(format!("\tbranch= {} \n", branch).as_bytes())
+            .unwrap();
+        git_modules.flush().unwrap();
+    }
+
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let out_lwpkt = out_path.join("lwpkt");
     let out_lwrb = out_path.join("lwrb");
