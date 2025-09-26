@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 #[derive(Default)]
 struct LwPktOptions {
     max_data_len: Option<usize>,
+    use_flags: bool,
 }
 
 impl LwPktOptions {
@@ -26,6 +27,11 @@ impl LwPktOptions {
 
         if let Some(v) = self.max_data_len {
             f.write_all(format!("\n#define LWPKT_CFG_MAX_DATA_LEN {v}\n").as_bytes())
+                .unwrap();
+        }
+
+        if self.use_flags {
+            f.write_all("\n#define LWPKT_CFG_USE_FLAGS\n".as_bytes())
                 .unwrap();
         }
 
@@ -54,6 +60,10 @@ fn main() {
 
     if let Some(v) = std::env::var_os("LWPKT_CFG_MAX_DATA_LEN") {
         options.max_data_len = Some(v.to_str().unwrap().parse::<usize>().unwrap());
+    }
+
+    if std::env::var_os("CARGO_FEATURE_FLAGS").is_some() {
+        options.use_flags = true;
     }
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
