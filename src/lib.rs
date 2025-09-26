@@ -6,14 +6,14 @@ mod ffi;
 
 pub struct LwRb {
     lwrb: ffi::lwrb,
-    buffer: Pin<Box<Vec<u8>>>,
+    buffer: Pin<Vec<u8>>,
 }
 
 impl LwRb {
     pub fn new(size: usize) -> Self {
         let mut lwrb = ffi::lwrb::default();
 
-        let mut buffer = Box::pin(vec![0u8; size]);
+        let mut buffer = Pin::new(vec![0u8; size]);
 
         let res = unsafe {
             ffi::lwrb_init(
@@ -225,13 +225,6 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
         }
     }
 
-    ///
-    /// /**
-    ///  * \brief           Get pointer to packet data
-    ///  * \param[in]       pkt: LwPKT instance
-    ///  * \return          Pointer to data
-    ///  */
-    /// #define lwpkt_get_data(pkt)      (void*)(((pkt) != NULL) ? ((pkt)->data) : NULL)
     fn get_data(&self) -> &[u8] {
         let len = self.lwpkt.m.len;
         &self.lwpkt.data[..len]
@@ -277,7 +270,7 @@ impl std::io::Read for LwPktRaw {
                 }
             }
         }
-        return Ok(buf.len());
+        Ok(buf.len())
     }
 }
 
@@ -298,7 +291,7 @@ impl std::io::Write for LwPktRaw {
             }
         }
 
-        return Ok(buf.len());
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

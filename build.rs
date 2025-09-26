@@ -73,7 +73,6 @@ fn main() {
 
     let lwpk_h = out_path.join("lwpkt.h");
     std::fs::copy("src/lwpkt/lwpkt/src/include/lwpkt/lwpkt.h", &lwpk_h).unwrap();
-    
 
     let lwpk_c = out_path.join("lwpkt.c");
     std::fs::copy("src/lwpkt/lwpkt/src/lwpkt/lwpkt.c", &lwpk_c).unwrap();
@@ -82,7 +81,7 @@ fn main() {
     std::fs::copy("src/lwpkt/libs/lwrb/src/include/lwrb/lwrb.h", &lwrb_h).unwrap();
 
     let lwrb_c: PathBuf = out_path.join("lwrb.c");
-    std::fs::copy("src/lwpkt/libs/lwrb/src/lwrb/lwrb.c",    &lwrb_c).unwrap();
+    std::fs::copy("src/lwpkt/libs/lwrb/src/lwrb/lwrb.c", &lwrb_c).unwrap();
 
     // let header = &[out_path];
     let c_source = &[lwrb_c, lwpk_c];
