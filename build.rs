@@ -44,6 +44,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=lwpkt_opts_template.h");
     println!("cargo:rerun-if-env-changed=LWPKT_CFG_MAX_DATA_LEN");
+    println!("cargo:rerun-if-env-changed=LWPKT_BRANCH");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
