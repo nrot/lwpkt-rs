@@ -200,6 +200,7 @@ dependencies = [
  "async-channel",
  "bindgen",
  "cc",
+ "log",
 ]
 
 [[package]]

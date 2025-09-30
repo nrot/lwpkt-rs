@@ -33,7 +33,7 @@ impl LwRb {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     ERR = 0x1,
     InProgress,
@@ -70,52 +70,43 @@ fn check_result(res: u32) -> Result<(), Error> {
     }
 }
 
-pub struct LwPkt<const RAW_SIZE: usize> {
+pub struct LwPkt {
     lwpkt: Pin<Box<ffi::lwpkt>>,
     read_buffer: Pin<Box<LwRb>>,
     write_buffer: Pin<Box<LwRb>>,
 
-    buffer: [u8; RAW_SIZE],
-    to_raw: Sender<u8>,
-    from_raw: Receiver<u8>,
+    to_raw: Sender<Vec<u8>>,
+    from_raw: Receiver<Vec<u8>>,
 }
 
-#[derive(Clone)]
 pub struct LwPktRaw {
-    to_pkt: Sender<u8>,
-    from_pkt: Receiver<u8>,
+    last_read: Vec<u8>,
+    to_pkt: Sender<Vec<u8>>,
+    from_pkt: Receiver<Vec<u8>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-pub struct Package<'a> {
+pub struct Package {
     pub cmd: u32,
     pub from: u8,
     pub to: u8,
-    pub data: &'a [u8],
+    pub data: Vec<u8>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Status<'a> {
-    InProgress,
-    WaitData,
-    Valid(Package<'a>),
-}
-
-impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
+impl LwPkt {
     pub const MAX_PACKAGE_SIZE: u32 = ffi::LWPKT_CFG_MAX_DATA_LEN;
 
     pub fn new(read_buffer: LwRb, write_buffer: LwRb) -> Result<(Self, LwPktRaw), Error> {
         let lwpkt = Box::pin(ffi::lwpkt::default());
 
-        let (tx_to_raw, rx_to_raw) = async_channel::bounded(RAW_SIZE);
-        let (tx_to_pkt, rx_to_pkt) = async_channel::bounded(RAW_SIZE);
+        let (tx_to_raw, rx_to_raw) = async_channel::bounded(64);
+        let (tx_to_pkt, rx_to_pkt) = async_channel::bounded(64);
 
         let mut result = Self {
             lwpkt,
             read_buffer: Box::pin(read_buffer),
             write_buffer: Box::pin(write_buffer),
-            buffer: [0u8; RAW_SIZE],
             to_raw: tx_to_raw,
             from_raw: rx_to_pkt,
         };
@@ -130,6 +121,7 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
         check_result(res)?;
 
         let raw = LwPktRaw {
+            last_read: Vec::new(),
             to_pkt: tx_to_pkt,
             from_pkt: rx_to_raw,
         };
@@ -143,7 +135,7 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
         check_result(res)
     }
 
-    pub fn write<'b>(&mut self, package: Package<'b>) -> Result<(), Error> {
+    pub fn write(&mut self, package: Package) -> Result<(), Error> {
         let res = unsafe {
             ffi::lwpkt_write(
                 self.lwpkt.as_mut().get_mut() as *mut _,
@@ -158,22 +150,21 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
 
         let wb = &mut self.write_buffer.lwrb as *mut _;
 
+        let mut buffer = vec![0u8; 1024];
         loop {
-            let res = unsafe { ffi::lwrb_read(wb, self.buffer.as_mut_ptr() as *mut _, RAW_SIZE) };
+            let res = unsafe { ffi::lwrb_read(wb, buffer.as_mut_ptr() as *mut _, buffer.len()) };
 
             if res == 0 {
                 break;
             }
 
-            for b in &self.buffer[..res] {
-                match self.to_raw.try_send(*b) {
-                    Ok(_) => {}
-                    Err(async_channel::TrySendError::Full(_)) => {
-                        return Err(Error::ErrorMem);
-                    }
-                    Err(async_channel::TrySendError::Closed(_)) => {
-                        return Err(Error::ErrorClosedRaw);
-                    }
+            match self.to_raw.try_send((&buffer[..res]).to_vec()) {
+                Ok(_) => {}
+                Err(async_channel::TrySendError::Full(_)) => {
+                    return Err(Error::ErrorMem);
+                }
+                Err(async_channel::TrySendError::Closed(_)) => {
+                    return Err(Error::ErrorClosedRaw);
                 }
             }
         }
@@ -181,13 +172,42 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
         Ok(())
     }
 
-    pub fn read(&'_ mut self) -> Result<Status<'_>, Error> {
-        let mut buffer_len = 0usize;
-        for (i, b) in self.buffer.iter_mut().enumerate() {
+    pub fn read(&'_ mut self) -> Result<Vec<Package>, Error> {
+        let mut results = Vec::new();
+        loop {
             match self.from_raw.try_recv() {
-                Ok(v) => *b = v,
+                Ok(buffer) => {
+                    let mut from = 0;
+                    while from < buffer.len() {
+                        let res = unsafe {
+                            ffi::lwrb_write(
+                                &mut self.read_buffer.lwrb as *mut _,
+                                (&buffer[from..]).as_ptr() as *mut _,
+                                buffer.len() - from,
+                            )
+                        };
+
+                        let status =
+                            unsafe { ffi::lwpkt_read(self.lwpkt.as_mut().get_mut() as *mut _) };
+
+                        match status {
+                            ffi::lwpktr_t::lwpktVALID => {
+                                results.push(Package {
+                                    cmd: self.get_cmd(),
+                                    data: self.get_data().to_vec(),
+                                    from: self.get_from(),
+                                    to: self.get_to(),
+                                });
+                            }
+                            ffi::lwpktr_t::lwpktWAITDATA => {}
+                            ffi::lwpktr_t::lwpktINPROG => {}
+                            e => return Err(e.into()),
+                        };
+
+                        from += res;
+                    }
+                }
                 Err(async_channel::TryRecvError::Empty) => {
-                    buffer_len = i;
                     break;
                 }
                 Err(_) => {
@@ -196,41 +216,15 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
             }
         }
 
-        if buffer_len > 0 {
-            let res = unsafe {
-                ffi::lwrb_write(
-                    &mut self.read_buffer.lwrb as *mut _,
-                    self.buffer.as_ptr() as *mut _,
-                    buffer_len,
-                )
-            };
-
-            if res != buffer_len {
-                return Err(Error::ErrorMem);
-            }
-        }
-
-        let res = unsafe { ffi::lwpkt_read(self.lwpkt.as_mut().get_mut() as *mut _) };
-
-        match res {
-            ffi::lwpktr_t::lwpktVALID => Ok(Status::Valid(Package {
-                cmd: self.get_cmd(),
-                data: self.get_data(),
-                from: self.get_from(),
-                to: self.get_to(),
-            })),
-            ffi::lwpktr_t::lwpktWAITDATA => Ok(Status::WaitData),
-            ffi::lwpktr_t::lwpktINPROG => Ok(Status::InProgress),
-            e => Err(e.into()),
-        }
+        Ok(results)
     }
 
-    fn get_data(&self) -> &[u8] {
+    pub fn get_data(&self) -> &[u8] {
         let len = self.lwpkt.m.len;
         &self.lwpkt.data[..len]
     }
 
-    fn get_cmd(&self) -> u32 {
+    pub fn get_cmd(&self) -> u32 {
         self.lwpkt.m.cmd as u32
     }
 
@@ -258,10 +252,50 @@ impl<const RAW_SIZE: usize> LwPkt<RAW_SIZE> {
 
 impl std::io::Read for LwPktRaw {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        for (i, b) in buf.iter_mut().enumerate() {
+        let mut readed = 0usize;
+        if !self.last_read.is_empty() {
+            match buf.len().cmp(&self.last_read.len()) {
+                std::cmp::Ordering::Less => {
+                    buf.copy_from_slice(&self.last_read[..buf.len()]);
+                    self.last_read = self.last_read[buf.len()..].to_vec();
+                    return Ok(buf.len());
+                }
+                std::cmp::Ordering::Equal => {
+                    buf.copy_from_slice(&self.last_read);
+                    self.last_read = Vec::new();
+                    return Ok(buf.len());
+                }
+                std::cmp::Ordering::Greater => {
+                    (&mut buf[..self.last_read.len()]).copy_from_slice(&self.last_read);
+                    readed = self.last_read.len();
+                    self.last_read = Vec::new();
+                }
+            }
+        }
+
+        loop {
             match self.from_pkt.try_recv() {
-                Ok(v) => *b = v,
-                Err(async_channel::TryRecvError::Empty) => return Ok(i),
+                Ok(src) => {
+                    let buffer = &mut buf[readed..];
+                    match buffer.len().cmp(&src.len()) {
+                        std::cmp::Ordering::Less => {
+                            buffer.copy_from_slice(&src[..buffer.len()]);
+                            self.last_read = src[buffer.len()..].to_vec();
+                            readed += buffer.len();
+                            return Ok(readed);
+                        }
+                        std::cmp::Ordering::Equal => {
+                            buffer.copy_from_slice(&src);
+                            readed += buffer.len();
+                            return Ok(readed);
+                        }
+                        std::cmp::Ordering::Greater => {
+                            (&mut buffer[..src.len()]).copy_from_slice(&src);
+                            readed += src.len();
+                        }
+                    }
+                }
+                Err(async_channel::TryRecvError::Empty) => break,
                 Err(e) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::BrokenPipe,
@@ -270,28 +304,21 @@ impl std::io::Read for LwPktRaw {
                 }
             }
         }
-        Ok(buf.len())
+
+        Ok(readed)
     }
 }
 
 impl std::io::Write for LwPktRaw {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        for (i, b) in buf.iter().enumerate() {
-            match self.to_pkt.try_send(*b) {
-                Ok(()) => {}
-                Err(async_channel::TrySendError::Full(_)) => {
-                    return Ok(i);
-                }
-                Err(async_channel::TrySendError::Closed(v)) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        async_channel::TrySendError::Closed(v).to_string(),
-                    ));
-                }
-            }
+        match self.to_pkt.try_send(buf.to_vec()) {
+            Ok(()) => Ok(buf.len()),
+            Err(async_channel::TrySendError::Full(_)) => Ok(0),
+            Err(async_channel::TrySendError::Closed(v)) => Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                async_channel::TrySendError::Closed(v).to_string(),
+            )),
         }
-
-        Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -303,14 +330,14 @@ impl std::io::Write for LwPktRaw {
 mod test {
     use std::io::{Read, Write};
 
-    use crate::{LwPkt, LwRb, Status};
+    use crate::{LwPkt, LwRb};
 
     #[test]
     fn init_test() {
         let rb = LwRb::new(1024);
         let wb = LwRb::new(1024);
 
-        let (mut lwpkt, mut raw_pkt) = LwPkt::<1024>::new(rb, wb).unwrap();
+        let (mut lwpkt, mut raw_pkt) = LwPkt::new(rb, wb).unwrap();
 
         lwpkt.set_addres(0x12).unwrap();
 
@@ -319,7 +346,7 @@ mod test {
                 cmd: 0x85,
                 from: 0,
                 to: 0x11,
-                data: b"some hello",
+                data: b"some hello".to_vec(),
             })
             .unwrap();
 
@@ -331,13 +358,13 @@ mod test {
         let s = lwpkt.read().unwrap();
 
         assert_eq!(
-            s,
-            Status::Valid(crate::Package {
+            (*s.first().unwrap()),
+            crate::Package {
                 cmd: 0x85,
                 from: 0x12,
                 to: 0x11,
-                data: b"some hello"
-            })
+                data: b"some hello".to_vec()
+            }
         )
     }
 }

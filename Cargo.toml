@@ -5,11 +5,12 @@ edition = "2024"
 
 [dependencies]
 async-channel = "2.5.0"
+log = "0.4"
 
 [features]
 flags = []
 
 [build-dependencies]
-bindgen = "0.72.*"
-cc = {version = "1.0.*", features = ["parallel"] }
+bindgen = "0.72"
+cc = {version = "1.0", features = ["parallel"] }
 
